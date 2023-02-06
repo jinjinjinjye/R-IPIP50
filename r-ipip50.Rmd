@@ -1,0 +1,132 @@
+---
+title: "IPIP-50 Basics"
+author: "Wong Jin Jye"
+date: "2023-02-06"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Set up
+Import packages and read in dataset 
+
+```{r setup and import, message=FALSE} 
+library(tidyverse)
+library(ggplot2)
+pers_dat_full <- read_csv("qualtrics test dataset.csv") %>% slice(-c(1:2)) #slice to remove qualtrics metadata rows
+```
+
+## Preprocessing and scoring
+As a reminder, the scale used is the [IPIP-50](https://ipip.ori.org/New_IPIP-50-item-scale.htm), and the scoring instructions can be found [here](https://ipip.ori.org/newScoringInstructions.htm).
+Ensure that in your Qualtrics survey, the question matrix containing the items is named "IPIP-50", with the order of the statements unchanged. 
+
+```{r preprocessing, message=FALSE} 
+pers_dat <- pers_dat_full %>% select(ResponseId, `IPIP-50_1`:`IPIP-50_50`) #obtain only columns related to the IPIP-50
+pers_dat <- na.omit(pers_dat) #remove all incomplete entries
+
+# Obtain the reverse-scored and normally scored items
+rev_items <- c(2,4,6,8,10,12,14,16,18,20,22,24,26,28,29,30,32,34,36,38,39,44,46,49)
+norm_items <- seq(1,50)[!(seq(1,50) %in% rev_items)]
+rev_item_colnames <- paste("IPIP-50_", rev_items, sep="")
+norm_item_colnames <- paste("IPIP-50_", norm_items, sep="")
+
+# Get a new dataframe with numeric values
+pers_numeric <- data.frame('ResponseId' = pers_dat$ResponseId)
+
+for (c in colnames(pers_dat)) {
+  #print(c)
+  pers_numeric[[c]] <- pers_dat[[c]]
+  if (c == 'ResponseId') {
+    next
+  } else if (c %in% norm_item_colnames) {
+    pers_numeric[[c]] <- gsub("Very Inaccurate", 1, pers_numeric[[c]])
+    pers_numeric[[c]] <- gsub("Moderately Inaccurate", 2, pers_numeric[[c]])
+    pers_numeric[[c]] <- gsub("Neither Accurate nor Inaccurate", 3, pers_numeric[[c]])
+    pers_numeric[[c]] <- gsub("Moderately Accurate", 4, pers_numeric[[c]])
+    pers_numeric[[c]] <- gsub("Very Accurate", 5, pers_numeric[[c]])
+  } else if (c %in% rev_item_colnames) {
+    pers_numeric[[c]] <- gsub("Very Inaccurate", 5, pers_numeric[[c]])
+    pers_numeric[[c]] <- gsub("Moderately Inaccurate", 4, pers_numeric[[c]])
+    pers_numeric[[c]] <- gsub("Neither Accurate nor Inaccurate", 3, pers_numeric[[c]])
+    pers_numeric[[c]] <- gsub("Moderately Accurate", 2, pers_numeric[[c]])
+    pers_numeric[[c]] <- gsub("Very Accurate", 1, pers_numeric[[c]])
+  } else {
+    print("You should not be here")
+  }
+  pers_numeric[[c]] <- as.numeric(pers_numeric[[c]]) #convert to numeric, since it will be a string
+}
+
+# Obtain score totals for each trait
+trait_e_items <- seq(1,50,5) #extroversion
+trait_a_items <- seq(2,50,5) #agreeableness
+trait_c_items <- seq(3,50,5) #conscientiousness
+trait_n_items <- seq(4,50,5) #neuroticism = emotional stability
+trait_o_items <- seq(5,50,5) #openness to experience = intellect/imagination
+
+e_item_colnames <- paste("IPIP-50_", trait_e_items, sep="")
+a_item_colnames <- paste("IPIP-50_", trait_a_items, sep="")
+c_item_colnames <- paste("IPIP-50_", trait_c_items, sep="")
+n_item_colnames <- paste("IPIP-50_", trait_n_items, sep="")
+o_item_colnames <- paste("IPIP-50_", trait_o_items, sep="")
+
+pers_numeric$e_total <- rowSums(pers_numeric[,e_item_colnames])
+pers_numeric$a_total <- rowSums(pers_numeric[,a_item_colnames])
+pers_numeric$c_total <- rowSums(pers_numeric[,c_item_colnames])
+pers_numeric$n_total <- rowSums(pers_numeric[,n_item_colnames])
+pers_numeric$o_total <- rowSums(pers_numeric[,o_item_colnames])
+
+```
+
+You should now have a dataframe, `pers_numeric`, with the scores for each item and the sum of the scores for each trait, for every participant. The minimum score a participant can obtain for a trait is 10 (having a score of 1 for each of the ten items assessing that trait) and the maximum score is 50 (a 5 for all ten items). As a test, let's take a look at the extroversion scores in our example dataset.
+
+```{r extroversion}
+psych::describe(pers_numeric$e_total)
+hist(pers_numeric$e_total)
+```
+
+## Extra: Dividing into Categories
+
+While personality scores are a continuous scale, there may be occasions where one might want to compare the differences between populations with a high level versus a low level of a trait e.g. between more extroverted people and less extroverted individuals. In this case, dividing the participants into categories based on their scores might be useful. 
+
+```{r categorial, message=FALSE}
+#https://stackoverflow.com/questions/15016723/create-categories-by-comparing-a-numeric-column-with-a-fixed-value
+
+pers_overall <- subset(pers_numeric, select = c("ResponseId", "e_total", "a_total", "c_total", "n_total", "o_total"))
+
+pers_overall <- pers_overall %>% mutate(e_group = case_when(e_total >= as.vector(quantile(pers_numeric$e_total, probs = c(0.66, 0.33)))[1] ~ "high",
+                                            e_total > as.vector(quantile(pers_numeric$e_total, probs = c(0.66, 0.33)))[2] ~ "med",
+                                            TRUE ~ "low"))
+
+pers_overall <- pers_overall %>% mutate(a_group = case_when(a_total >= as.vector(quantile(pers_numeric$a_total, probs = c(0.66, 0.33)))[1] ~ "high",
+                                            a_total > as.vector(quantile(pers_numeric$a_total, probs = c(0.66, 0.33)))[2] ~ "med",
+                                            TRUE ~ "low"))
+pers_overall <- pers_overall %>% mutate(c_group = case_when(c_total >= as.vector(quantile(pers_numeric$c_total, probs = c(0.66, 0.33)))[1] ~ "high",
+                                            c_total > as.vector(quantile(pers_numeric$c_total, probs = c(0.66, 0.33)))[2] ~ "med",
+                                            TRUE ~ "low"))
+pers_overall <- pers_overall %>% mutate(n_group = case_when(n_total >= as.vector(quantile(pers_numeric$n_total, probs = c(0.66, 0.33)))[1] ~ "high",
+                                            n_total > as.vector(quantile(pers_numeric$n_total, probs = c(0.66, 0.33)))[2] ~ "med",
+                                            TRUE ~ "low"))
+pers_overall <- pers_overall %>% mutate(o_group = case_when(o_total >= as.vector(quantile(pers_numeric$o_total, probs = c(0.66, 0.33)))[1] ~ "high",
+                                            o_total > as.vector(quantile(pers_numeric$o_total, probs = c(0.66, 0.33)))[2] ~ "med",
+                                            TRUE ~ "low"))
+
+#Get vector of participant ids for high and low categories
+high_e_ids <- as.vector(filter(pers_overall, e_group == 'high')$ResponseId)
+low_e_ids <- as.vector(filter(pers_overall, e_group == 'low')$ResponseId)
+
+high_a_ids <- as.vector(filter(pers_overall, a_group == 'high')$ResponseId)
+low_a_ids <- as.vector(filter(pers_overall, a_group == 'low')$ResponseId)
+
+high_c_ids <- as.vector(filter(pers_overall, c_group == 'high')$ResponseId)
+low_c_ids <- as.vector(filter(pers_overall, c_group == 'low')$ResponseId)
+
+high_n_ids <- as.vector(filter(pers_overall, n_group == 'high')$ResponseId)
+low_n_ids <- as.vector(filter(pers_overall, n_group == 'low')$ResponseId)
+
+high_o_ids <- as.vector(filter(pers_overall, o_group == 'high')$ResponseId)
+low_o_ids <- as.vector(filter(pers_overall, o_group == 'low')$ResponseId)
+```
+In the above case, participants were divided into three categories: high (66th percentile and above), medium (med; 34th to 65th percentile), and low (33rd percentile and below). An additional dataframe, `pers_overall`, was also generated to contain just the score totals and the categories each participant falls into. 
+
